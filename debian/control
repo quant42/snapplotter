@@ -1,0 +1,12 @@
+Source: snapplotter
+Maintainer: Yann Spöri <yann_spoeri@web.de>
+Section: python
+Priority: optional
+Build-Depends: python-all (>= 2.6.6-3), debhelper (>= 7.4.3)
+Standards-Version: 3.9.1
+
+Package: snapplotter
+Architecture: all
+Depends: ${misc:Depends}, ${python:Depends}
+Description: Visualization of snap output files.
+ Visualize the output of snap -m all --print-collections as a svg image.

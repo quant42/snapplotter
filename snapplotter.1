@@ -1,0 +1,81 @@
+.TH snapplotter 1
+.SH NAME
+snapplotter \- Plots the results of snap2 --print-collections -m all.
+
+The results will be plotted to a svg file (http://www.w3.org/TR/SVG/). Large SVG images can be viewed with firefox or another webbrowser. Small svg images can be opened with other graphic programs like eog/gimp, too.
+.SH SYNOPSIS
+  \fBsnapplotter\fR [\fB-h\fR] [\fB-i\fR [\fIINPUT\fR [\fIINPUT\fR ...]]] [\fB-o\fR \fIOUTPUT\fB] [\fB-m\fR \fIMODE\fR] [\fB-f\fR \fIFROMPOS\fR]
+  [\fB-t\fR \fITOPOS\fR] [\fB-p\fR \fIPOS\fR] [\fB-n\fR \fINEG\fR] [\fB-u\fR \fIUNKNOWN\fR] [\fB-s\fR] [\fB-z\fR \fIZ\fR] [\fB-k\fR \fIK\fR]
+  [\fB-b\fR \fIBORDER\fR] [\fB-g\fR \fIGAPCOLOR\fR] [\fB--msa\fR \fIMSA\fR]
+.SH OPTIONS
+.TP
+\fB -h, --help\fR
+shows an help message and quit the program. All other commandline options will be ignored.
+.TP
+\fB -i, --input\fR \fIfile\fR
+The snap2 files to plot. Only call this program with multiple snap input files, with the --msa command, to create a multiple sequence alignment plot of the snap files. (default = results.snap2)
+.TP
+\fB -o, --output\fR \fIfile\fR
+The name of the output svg file. (default = out.svg)
+.TP
+\fB -m, --mode\fR \fImode integer\fR
+The plotting mode, depending on this mode, different informations will be plotted. In mode 0, the average of all neuronal network predictions will be plotted. In mode 1, the output of all networks will be plotted. Mode 2 will plot the networks average as well as all network results. Mode 3 will plot the relative Index and mode 4 the accuracy. Mode 5 does not work with --msa and plots the snap results as a function. (default = 0)
+.TP
+\fB -f, --from\fR \fIinteger\fR
+Don't plot/Skip plotting positions that are smaller than this given integer. All positions are 1 indexed. (default = 1, ignored in --msa)
+.TP
+\fB -t, --to\fR \fIinteger\fR
+Don't plot/Skip plotting positions that are greater than the given integer. All positions are 1 indexed. (default = 1000, ignored in --msa)
+.TP
+\fB -p, --pos\fR \fIangle\fR
+An angle between 0 and 360. This angle represents a color in the HSV color model (https://en.wikipedia.org/wiki/HSL_and_HSV). The given color represents SNPs, that are predicted to have no effect. (default = 120, represents green)
+.TP
+\fB -n, --neg\fR \fIangle\fR
+See -p, but the given color represents SNPs, that are predicted to have an effect. (default = 0, represents red)
+.TP
+\fB -u, --unknown\fR \fIcolor\fR
+A color for SNPs that are not represented in the snap output file. Since snap2 -m all don't predict the effect of an SNP from an aminoacid to the same aminoacid, this SNP prediction is not given in the result file. All unknown SNPs will be colored in the given color. The color may be given in hex representation (#rrggbb), in decimal representation (rgb(0-255, 0-255, 0-255)) or as it's name. (default = black)
+.TP
+\fB -s, --scale\fR
+Instead of plotting a snap file, output a color scale. The scale represents, which color in an svg image, represents which (predicted) effect value.
+.TP
+\fB -z, --zRange\fR \fIinteger\fR
+If abs(predicted effected value) < integer, plot this white. In other words, if the predicted effect is in a range from -integer to integer, be not sure about the effect and plot the cell white. (default = 50)
+.TP
+\fB -b, --border\fR \fIfile\fR
+A file containing borders to plot into the image (each line in the border file represents a border. The lines are tabseperated: xPos yPos width height [description] [color]; in msa mode: index xPos yPos width height [description] [color])(default = None))
+.TP
+\fB -g, --gapColor\fR \fIcolor\fR
+In combination with --msa, this can be used to color gaps differently. (default = lightgray)
+.TP
+\fB --msa\fR \fIfile\fR
+If this argument is given, a multiple sequence of the snap files is plotted. Hereby the coordinates for the gaps to plot are taken from the given file (multiple sequence alignment in the fasta format). All snap prediction files for this alignment have to be passed in -i, in the same order as they have been declared in the msa file.
+.SH EXAMPLES
+It's most easily to plot a snap file, with default color settings with:
+
+    snapplotter -i $snapFile -o $svgFile
+
+However if you may want to change the colors from green/red to blue/yellow, use:
+
+    snapplotter -i $snapFile -o $svgFile -p 240 -n 60
+
+and you may create the color scale for this blue/yellow plot with:
+
+    snapplotter -s -p 240 -n 60 -o scale.svg
+
+If you have a folder where you store all snap result files in (and the record id's of the fasta msa file are the same as the filenames), you may plot an msa of them with:
+
+    snapplotter --msa $msaFile -i $(grep ">" $msaFile | sed -r "s#>([^ ]*)#/path/to/folder/\1.snap2#ig") -o msa.svg
+
+.SH TIPS AND TRICKS
+You may want to convert your created svg images to another format. Unfortunately, you may not be able to open svg images of any size in gimp, incscape etc., to convert them (, although firefox may open them most easily). Up to a certain filesize limit, the program rsvg-convert in the librsvg2-bin package may be helpfull. Converting it with: rsvg-convert $svgFile -o $pngFile.
+.SH LICENSE
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+.SH AUTHORS
+Yann Spöri
+.SH BUGS AND FEATURES
+Please send bugs and feature requests to Yann Spöri <yann_spoeri@web.de>

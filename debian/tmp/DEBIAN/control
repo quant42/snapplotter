@@ -1,0 +1,9 @@
+Package: snapplotter
+Version: 1.0.0-1
+Architecture: all
+Maintainer: Yann Spöri <yann_spoeri@web.de>
+Installed-Size: 73
+Section: python
+Priority: optional
+Description: Visualization of snap output files.
+ Visualize the output of snap -m all --print-collections as a svg image.

@@ -1,0 +1,273 @@
+#! /usr/bin/env python
+
+# imports
+import argparse, datetime, time, sys, os, inspect
+import snap2XReader
+from math import *
+import msaXReader
+
+# consts
+AA_ONE_LETTER = [ "A", "R", "N", "D", "C", "Q", "E", "G", "H", "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "V" ]
+
+# plotting modes:
+# 0/all else: plot networkSum
+# 1: networks
+# 2: networkSum + networks
+# 3: relIndex
+# 4: accuracy
+# 5: function
+# get commandline options
+parser = argparse.ArgumentParser("Converter to convert the results from snap2 to a viewable svg image!")
+parser.add_argument("-i", "--input", dest='input',  nargs='*', default="results.snap2", type=str, help="The snap2 file to convert! (Multiples files are only allowed in combination with --msa!)", required=False)
+parser.add_argument("-o", "--output", dest='output', default="out.svg", type=str, help="The name of the output svg file!", required=False)
+parser.add_argument("-m", "--mode", dest='mode', default=0, type=int, help="The plotting mode! (m = 0: networkSum, 1: networks, 2: networkSum + networks, 3: relIndex, 4: accuracy, 5: function (not available in msa!))", required=False)
+parser.add_argument("-f", "--from", dest='fromPos', default=1, type=int, help="Skip aminoacid positions that are smaller than the given number (default = 1) (will be ignored in msa!)!", required=False)
+parser.add_argument("-t", "--to", dest='toPos', default=1000, type=int, help="Skip aminoacid positions that are larger than the given number (default = 1000)! (will be ignored in msa!)", required=False)
+parser.add_argument("-p", "--pos", dest='pos', default=120, type=float, help="An angle(HSV, degree) representing aminoacids with no effect (default = 120)", required=False)
+parser.add_argument("-n", "--neg", dest='neg', default=0, type=float, help="An angle(HSV, degree) representing aminoacids with effect (default = 0)", required=False)
+parser.add_argument("-u", "--unknown", dest='unknown', default="black", type=str, help="Color for unknown or same aminoacids (default = black)", required=False)
+parser.add_argument("-s", "--scale", action="store_true", dest='scale', help="Output a color scale")
+parser.add_argument("-z", "--zRange", dest="z", default=50.0, type=float, help="Color unknown range", required=False)
+parser.add_argument("-k", "--kNumber", dest="k", default=5, type=int, help="Output each k column number (default = 5)", required=False)
+parser.add_argument("-b", "--border", dest="border", default=None, type=str, help="A file containing borders to plot into the image (each line tabseperated: xPos yPos width height [description] [color]; msa: index xPos yPos width height [description] [color])(default = None)", required=False)
+parser.add_argument("-g", "--gapColor", dest="gapColor", default="lightgray", type=str, help="A color for displaing gaps in msa mode (default: lightgray)", required=False)
+parser.add_argument("--msa", dest="msa", default=None, type=str, help="If this argument is given, a multiple sequence alignment will be plotted. In this case, all snap2 files for this alignment have to be given in -i. The msa to plot has to be inputted here! The snap files in -i have to be given in the same order, as they are in the msa file!", required=False)
+args = parser.parse_args()
+
+# do possible argument correction
+args.pos, args.neg, args.z = abs(args.pos) % 360, abs(args.neg) % 360, min(args.z, 99)
+
+# some helper function
+# convert an hsv color to an rgb color string for any svg image
+# H should be in range [0, 360] and S, V in range [0, 1]
+def hsv2rgb(H, S, V):
+    h_i = int(H / 60)
+    f = (H / 60 - h_i)
+    p, q, t = V * (1 - S), V * (1 - S * f), V * (1 - S * (1 - f))
+    V, t, p, q = int(V * 255), int(t * 255), int(p * 255), int(q * 255)
+    if h_i == 0 or h_i == 6:
+        return "rgb({},{},{})".format(V, t, p)
+    if h_i == 1:
+        return "rgb({},{},{})".format(q, V, p)
+    if h_i == 2:
+        return "rgb({},{},{})".format(p, V, t)
+    if h_i == 3:
+        return "rgb({},{},{})".format(p, q, V)
+    if h_i == 4:
+        return "rgb({},{},{})".format(t, p, V)
+    if h_i == 5:
+        return "rgb({},{},{})".format(V, p, q)
+
+# convert a value to a rgb color string (the more positive val is, the more effect)
+# val should be in range [-100, 100] or float('inf') if not set
+def val2color(args, val):
+    if val == float('inf'):
+        return args.unknown
+    w = args.neg if val > 0 else args.pos
+    val = abs(val)
+    if val < args.z:
+        return "white"
+    return hsv2rgb(w, (val - float(args.z)) * (100 / (100 - args.z)) / 100, 1)
+
+# convert the network output to a svg color string
+def networkOutToColor(args, a, b):
+    if a == float('inf') or b == float('inf'):
+        return args.unknown
+    return val2color(args, b - a)
+
+def cellToSvgCode(args, x, y, s, cell):
+    # out all network results as polygon
+    if args.mode == 1:
+        sh, r = s / 2, 2 * pi / len(cell.networks)
+        polygons = [
+            "<polygon points=\"{},{} {},{} {},{}\" style=\"fill:{};\" />\n".format(x+sh*(cos(r*i)+1),y+sh*(sin(r*i)+1),x+sh*(cos(r*(i+1))+1),y+sh*(sin(r*(i+1))+1),x+sh,y+sh,networkOutToColor(args, cell.networks[i][0], cell.networks[i][1])) for i in range(0, len(cell.networks))
+        ]
+        return "".join(polygons)
+    # out all network results and networkSums
+    if args.mode == 2:
+        args.mode = 0
+        a = cellToSvgCode(args, x, y, s, cell)
+        args.mode = 1
+        b = cellToSvgCode(args, x, y, s, cell)
+        args.mode = 2
+        return a + b
+    # out relIndex
+    if args.mode == 3:
+        return "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" style=\"fill:{};\" />\n".format(x, y, s, s, val2color(args, cell.relIndex * 11))
+    # out accuracy
+    if args.mode == 4:
+        return "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" style=\"fill:{};\" />\n".format(x, y, s, s, val2color(args, cell.accuracy))
+    # out only networkSums
+    return "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" style=\"fill:{};\" />\n".format(x, y, s, s, val2color(args, cell.networkSum))
+
+# weather to print a scale
+if args.scale:
+    with open(args.output, "w+") as f:
+        f.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+        f.write("<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" height=\"30\" width=\"202\">\n")
+        f.write("<rect x=\"0\" y=\"0\" width=\"202\" height=\"30\" style=\"fill:white;\" />\n")
+        for i in range(-100, 101):
+            f.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" style=\"stroke:{};stroke-width:1\"/>\n".format(i + 101, 1, i + 101, 29, val2color(args, i)))
+        f.write("</svg>")
+    exit(0)
+
+# msa?
+if args.msa:
+    # "cool", a msa to plot
+    # read in the msa!
+    msa = msaXReader.MsaReader(args.msa)
+    
+    # now plot
+    try:
+        # some consts
+        x, y, s = 25, 25, 30
+        # open msa file
+        with open(args.output, "w+") as f:
+            # write svg header
+            f.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+            f.write("<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" height=\"{}\" width=\"{}\">\n".format((20 * s + 2 * y) * len(msa.identifiers) + y, msa.length * s + 2 * x))
+            
+            # ok, write the amino acids at the side
+            for z in range(len(msa.identifiers)):
+                for i in range(0, len(AA_ONE_LETTER)):
+                    f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(5, z * (20 * s + 2 * y) + y + s * (i + 1) - s / 2 + 6, AA_ONE_LETTER[i]))
+            
+            # print bottom index
+            bottom = len(msa.identifiers) * (20 * s + 2 * y) + 17
+            for i in range(0, msa.length + 1, args.k):
+                if i != 0:
+                    f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(x + s * (i - 1) + 10 - (len(str(i)) * 2), bottom, i))
+            
+            # write each snap "matrix"
+            for i in range(len(msa.identifiers)):
+                # open matrix
+                matrix = snap2XReader.Matrix(args.input[i])
+                # consts
+                x_ = x
+                # for each column
+                index = 1
+                for c in msa.aligns[i]:
+                    # consts
+                    y_ = y + (2 * y + 20 * s) * i
+                    # print amino acids first
+                    f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(x_ + 8, y_ - 8, c))
+                    # skip?
+                    if c != "-" and c != "." and c != "_" and c != " ":
+                        # print cells
+                        for cell in matrix[index]:
+                            f.write(cellToSvgCode(args, x_, y_, s, cell))
+                            y_ += s
+                        # print indices
+                        if index % args.k == 0:
+                            f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(x_ + 10 - (len(str(index)) * 2), (20 * s + 2 * y) * (i + 1) - 8, index))
+                        # inc index
+                        index += 1
+                    else:
+                        f.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" style=\"fill:{};\" />\n".format(x_, y_, s, 20*s, args.gapColor))
+                    # inc x
+                    x_ += s
+            
+            # borders!
+            if args.border:
+                with open(args.border) as t:
+                    for line in t:
+                        # get borders argument
+                        line = line.strip()
+                        if line == "":
+                            continue
+                        tmp = line.split("\t")
+                        index, xPos, yPos, width, height, desc, color = int(tmp[0]), int(tmp[1]), int(tmp[2]), int(tmp[3]), int(tmp[4]), "", "black" 
+                        try:
+                            desc = tmp[5]
+                            color = tmp[6]
+                        except:
+                            pass
+                        xPos, yPos, width, height = x + (xPos - 1) * s - 3, y + (yPos - 1) * s - 3 + (2 * y + 20 * s) * index, width * s + 6, height * s + 6
+                        f.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" style=\"stroke:{};stroke-width:2;fill-opacity:0\"/>".format(xPos, yPos, width, height, color))
+                        f.write("<text x=\"{}\" y=\"{}\" fill=\"{}\">{}</text>\n".format(xPos, yPos + height + 15, color, desc))
+            
+            # close svg image
+            f.write("</svg>")
+    except:
+        ts = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+        if sys.version_info >= (3, 0):
+            print("[ERR WRITING SVG FILE {}] {} on line {}".format( ts, str(e), sys.exc_info()[2] ))
+        else:
+            print("[ERR WRITING SVG FILE {}] {} on line {}".format( ts, str(e), sys.exc_traceback.tb_lineno )) #sys.exc_info()[2]
+        exit(1)
+
+else:
+    # normal plotting of a single snap2 file
+    # parse the svg image
+    matrix = snap2XReader.Matrix(args.input[0])
+    
+    # output the svg image
+    try:
+        x, y, s = 25, 25, 30
+        lastPosX, lastPosY = None, None # only used in mode m == 5
+        with open(args.output, "w+") as f:
+            f.write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
+            f.write("<svg xmlns=\"http://www.w3.org/2000/svg\" version=\"1.1\" height=\"{}\" width=\"{}\">\n".format(20 * s + 2 * y, (min(args.toPos, len(matrix)) + 1 - args.fromPos) * s + 2 * x))
+            if args.mode == 5: # special function plotting mode 5
+                f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(5, y + 10 * s, "0"))
+                f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(5, y, " 100"))
+                f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(5, y + 20 * s, "-100"))
+            else:
+                # matrix plotting modes
+                for i in range(0, len(AA_ONE_LETTER)):
+                    f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(5, y + s * (i + 1) - s / 2 + 6, AA_ONE_LETTER[i]))
+            x_, y_ = x, y
+            for column in matrix:
+                # skip line?
+                if args.fromPos > column.pos:
+                    continue
+                if args.toPos < column.pos:
+                    break
+                # process line!
+                # output function if plotting mode m == 5:
+                if args.mode == 5:
+                    sum = 0
+                    for cell in column:
+                        if cell.networkSum != float('inf'):
+                            sum += cell.networkSum
+                    # stretch sum val (range -1000 to 1000) to position
+                    posX = x_ + s / 2
+                    posY = y + 10 * s - (sum / 1900.0 * 10 * s)
+                    if (not lastPosX == None) and (not lastPosY == None):
+                        f.write("<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" style=\"stroke:black\" />\n".format(lastPosX, lastPosY, posX, posY))
+                    lastPosX, lastPosY = posX, posY
+                # output another matrix plotting format
+                else:
+                    f.write("<text x=\"{}\" y=\"20\">{}</text>\n".format(x_ + 8, column.aaFrom))
+                    for cell in column:
+                        f.write(cellToSvgCode(args, x_, y_, s, cell))
+                        y_ += s
+                if column.pos % args.k == 0:
+                    f.write("<text x=\"{}\" y=\"{}\">{}</text>\n".format(x_ + 10 - (len(str(column.pos)) * 2), 20 * s + 2 * y - 8, column.pos))
+                x_, y_ = x_ + s, y
+            # print borders, if border file has been declared
+            if args.border:
+                with open(args.border) as t:
+                    for line in t:
+                        # get borders argument
+                        line = line.strip()
+                        if line == "":
+                            continue
+                        tmp = line.split("\t")
+                        xPos, yPos, width, height, desc, color = int(tmp[0]), int(tmp[1]), int(tmp[2]), int(tmp[3]), "", "black"
+                        try:
+                            desc = tmp[4]
+                            color = tmp[5]
+                        except:
+                            pass
+                        xPos, yPos, width, height = x + (xPos - 1) * s - 3, y + (yPos - 1) * s - 3, width * s + 6, height * s + 6
+                        f.write("<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" style=\"stroke:{};stroke-width:2;fill-opacity:0\"/>".format(xPos, yPos, width, height, color))
+                        f.write("<text x=\"{}\" y=\"{}\" fill=\"{}\">{}</text>\n".format(xPos, yPos + height + 15, color, desc))
+            f.write("</svg>\n")
+    except Exception as e:
+        ts = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d %H:%M:%S')
+        if sys.version_info >= (3, 0):
+            print("[ERR WRITING SVG FILE {}] {} on line {}".format( ts, str(e), sys.exc_info()[2] ))
+        else:
+            print("[ERR WRITING SVG FILE {}] {} on line {}".format( ts, str(e), sys.exc_traceback.tb_lineno )) # sys.exc_info()[2]
+        exit(1)
